@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.vite/
+
+backend/data/*.json
+backend/data/*.log
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

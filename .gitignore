@@ -1,0 +1,41 @@
+# dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# frontend build
+/dist/
+ai-wrist-dashboard/frontend/dist/
+
+# local runtime data
+ai-wrist-dashboard/backend/data/*.json
+!ai-wrist-dashboard/backend/data/settings.example.json
+*.log
+*.err.log
+*.out.log
+*.runtime.log
+
+# audio/test artifacts
+*.wav
+*.mp3
+tmp_*
+partial_*
+
+# local secrets/config
+.env
+.env.*
+*.key
+*.pem
+esp32c3-n8n-voice-client/voice_config.h
+
+# n8n exported workflows may contain credentials/API keys
+voice-assistant-*.json
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+ai-wrist-dashboard/.runtime/

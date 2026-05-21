@@ -1,0 +1,16 @@
+{
+  "name": "ai-wrist-dashboard-backend",
+  "version": "1.0.0",
+  "description": "Local service manager backend for the AI Wrist Assistant dashboard.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "ws": "^8.17.1"
+  }
+}
