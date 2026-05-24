@@ -3,6 +3,7 @@ dist/
 .vite/
 
 backend/data/*.json
+!backend/data/settings.example.json
 backend/data/*.log
 
 npm-debug.log*

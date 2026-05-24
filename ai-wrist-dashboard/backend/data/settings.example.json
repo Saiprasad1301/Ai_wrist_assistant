@@ -1,0 +1,19 @@
+{
+  "comPort": "COM13",
+  "baudRate": "115200",
+  "autoStartServices": ["n8n", "stt", "intent", "tts", "esp32"],
+  "commands": {
+    "n8n": {
+      "command": "node.exe",
+      "args": ["%APPDATA%\\npm\\node_modules\\n8n\\bin\\n8n", "start"],
+      "cwd": "C:\\n8n automation",
+      "env": {
+        "N8N_HOST": "0.0.0.0",
+        "N8N_PORT": "5678",
+        "N8N_PROTOCOL": "http",
+        "WEBHOOK_URL": "http://YOUR_PC_LAN_IP:5678/"
+      },
+      "enabled": true
+    }
+  }
+}

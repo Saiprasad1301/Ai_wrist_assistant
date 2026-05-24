@@ -50,9 +50,6 @@ ai-wrist-assistant/
     esp32c3-n8n-voice-client.ino
     voice_config.example.h   Copy to voice_config.h and fill local values
 
-  esp32c3-inmp441-smoke-test/
-    esp32c3-inmp441-smoke-test.ino
-
   local-whisper/
     server.py                STT gateway
     start-whisper.ps1
@@ -68,8 +65,6 @@ ai-wrist-assistant/
     start-gtts.ps1
     requirements.txt
 
-  codex-n8n-agent-pack/
-    Local Codex/n8n support agent pack
 ```
 
 ## Hardware Used

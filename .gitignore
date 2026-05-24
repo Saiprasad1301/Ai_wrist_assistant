@@ -25,6 +25,7 @@ partial_*
 # local secrets/config
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 esp32c3-n8n-voice-client/voice_config.h
