@@ -1,0 +1,521 @@
+{
+  "name": "Voice Assistant - Production Ready",
+  "description": "Sanitized n8n workflow export for the ESP32-C3 AI Wrist Assistant. Reconnect Gmail and Google Calendar credentials after import.",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voice",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "3667b178-ec2e-43ae-a100-81ffd3096891",
+      "name": "Webhook - Receive Audio",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -832,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5002/transcribe",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "audio",
+              "inputDataFieldName": "audio"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0f5a02a7-8516-433d-b9aa-51dc6035bca7",
+      "name": "Whisper - Speech to Text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -624,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5003/intent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.groqBody }}",
+        "options": {}
+      },
+      "id": "2e170c14-df03-476a-bc74-9bf475cb5181",
+      "name": "Pollinations GPT-5 Mini - General LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -448,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json;\nconst message = response.choices?.[0]?.message ?? {};\nconst rawContent = String(message.content ?? '').trim();\nconst REMINDER_ZONE = 'Asia/Kolkata';\n\nlet parsed = {};\ntry {\n  parsed = rawContent ? JSON.parse(rawContent) : {};\n} catch (error) {\n  const match = rawContent.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    try {\n      parsed = JSON.parse(match[0]);\n    } catch (innerError) {\n      parsed = {};\n    }\n  }\n}\n\nconst allowedTools = new Set(['send_email', 'set_reminder', 'respond']);\nlet toolName = String(parsed.tool_name || parsed.tool || 'respond');\nif (!allowedTools.has(toolName)) {\n  toolName = 'respond';\n}\n\nlet toolInput = parsed.tool_input ?? parsed.input ?? {};\nif (typeof toolInput !== 'object' || toolInput === null || Array.isArray(toolInput)) {\n  toolInput = {};\n}\n\nfunction cleanText(value) {\n  return String(value ?? '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction joinSingleCharacterRuns(value) {\n  const tokens = cleanText(value).split(' ').filter(Boolean);\n  const joined = [];\n\n  for (let index = 0; index < tokens.length; ) {\n    if (/^[a-z0-9]$/i.test(tokens[index])) {\n      const run = [];\n      while (index < tokens.length && /^[a-z0-9]$/i.test(tokens[index])) {\n        run.push(tokens[index].toLowerCase());\n        index += 1;\n      }\n      if (run.length >= 2) {\n        joined.push(run.join(''));\n      } else {\n        joined.push(...run);\n      }\n      continue;\n    }\n\n    joined.push(tokens[index]);\n    index += 1;\n  }\n\n  return joined.join(' ');\n}\n\nfunction normalizeReminderTranscript(value) {\n  return cleanText(value)\n    .replace(/\\bset remainder\\b/gi, 'set reminder')\n    .replace(/\\bcreate (?:a )?remainder\\b/gi, 'create a reminder')\n    .replace(/\\bremind her\\b(?=\\s+(for|at|on|today|tomorrow|\\d))/gi, 'reminder')\n    .replace(/\\bremainder\\b(?=\\s+(for|at|on|today|tomorrow|next|\\d))/gi, 'reminder');\n}\n\nconst transcript = normalizeReminderTranscript(joinSingleCharacterRuns($('Whisper - Speech to Text').item.json.text));\n\nfunction transcriptLooksLikeEmailRequest(value) {\n  return /\\b(?:send|write|compose)\\b(?:\\s+\\w+){0,4}\\s+email\\b/i.test(value) || /\\bemail\\s+to\\b/i.test(value);\n}\n\nfunction transcriptLooksLikeReminderRequest(value) {\n  return /\\b(remind me|set (?:a )?reminder|create (?:a )?reminder|create an event|schedule)\\b/i.test(value);\n}\n\nfunction extractEmailCommandTail(value) {\n  const cleaned = cleanText(value);\n  const match =\n    cleaned.match(/\\b(?:send|write|compose)\\s+(?:an?\\s+)?email\\s+to\\s+(.+)$/i) ||\n    cleaned.match(/\\bemail\\s+to\\s+(.+)$/i);\n  return cleanText(match?.[1] ?? '');\n}\n\nfunction extractEmailCandidateFromTranscript(value) {\n  const tail = extractEmailCommandTail(value);\n  if (!tail) {\n    return '';\n  }\n\n  const directEmail = tail.match(/^([^\\s,;:]+@[^\\s,;:]+\\.[^\\s,;:]+)/i);\n  if (directEmail?.[1]) {\n    return cleanText(directEmail[1]);\n  }\n\n  const spokenDomain = tail.match(\n    /^(.+?\\b(?:dypiu\\s+dot\\s+ac\\s+dot\\s+in|dypiu\\s+ac\\s+in|dot\\s+co\\s+dot\\s+in|dot\\s+ac\\s+dot\\s+in|dot\\s+com|dot\\s+org|dot\\s+net|dot\\s+edu|dot\\s+in)\\b)/i\n  );\n  if (spokenDomain?.[1]) {\n    return cleanText(spokenDomain[1]);\n  }\n\n  const stop = tail.search(/\\b(?:subject|body|message|write|say|saying|in the email)\\b/i);\n  return cleanText(stop >= 0 ? tail.slice(0, stop) : tail);\n}\n\nfunction extractEmailBodyFromTranscript(value, recipientCandidate = '') {\n  const cleaned = cleanText(value);\n  const rules = [\n    /\\bin the email\\s+(?:write|say)?\\s*(.+)$/i,\n    /\\b(?:body|message|write|say|saying)\\s+(.+)$/i,\n  ];\n\n  for (const rule of rules) {\n    const match = cleaned.match(rule);\n    if (match?.[1]) {\n      return cleanText(match[1]).replace(/^[,:-]+\\s*/, '');\n    }\n  }\n\n  const tail = extractEmailCommandTail(cleaned);\n  if (!tail) {\n    return '';\n  }\n\n  let remainder = tail;\n  const cleanedRecipient = cleanText(recipientCandidate);\n  if (cleanedRecipient) {\n    const lowerTail = tail.toLowerCase();\n    const lowerRecipient = cleanedRecipient.toLowerCase();\n    const recipientIndex = lowerTail.indexOf(lowerRecipient);\n    if (recipientIndex >= 0) {\n      remainder = tail.slice(recipientIndex + cleanedRecipient.length);\n    }\n  }\n\n  remainder = remainder.replace(/^(?:subject|body|message|write|say|saying|in the email)\\b[:\\s-]*/i, '');\n  return cleanText(remainder);\n}\n\nfunction normalizeSpokenEmail(value) {\n  let email = joinSingleCharacterRuns(cleanText(value)).toLowerCase();\n  if (!email) return '';\n\n  email = email\n    .replace(/[<>()\\\",']/g, ' ')\n    .replace(/\\bat\\s+the\\s+rate\\b/g, '@')\n    .replace(/\\bat\\s+rate\\b/g, '@')\n    .replace(/\\battherate\\b/g, '@')\n    .replace(/\\bat\\b/g, '@')\n    .replace(/\\bdot\\b/g, '.')\n    .replace(/\\bpoint\\b/g, '.')\n    .replace(/\\bunderscore\\b/g, '_')\n    .replace(/\\bhyphen\\b/g, '-')\n    .replace(/\\bdash\\b/g, '-')\n    .replace(/\\bplus\\b/g, '+')\n    .replace(/\\s+/g, '')\n    .replace(/-+/g, '');\n\n  email = email\n    .replace(/@rate\\./g, '@')\n    .replace(/@r?dby\\.piu\\./g, '@dypiu.')\n    .replace(/@r?dbypiu\\./g, '@dypiu.')\n    .replace(/@r?dby?piu\\./g, '@dypiu.')\n    .replace(/@dypiu\\.acid\\.in$/g, '@dypiu.ac.in')\n    .replace(/@dypiu\\.a\\.c\\.in$/g, '@dypiu.ac.in')\n    .replace(/\\.acid\\.in$/g, '.ac.in')\n    .replace(/dypiu\\.?ac\\.?in$/g, 'dypiu.ac.in');\n\n  if (!email.includes('@') && email.endsWith('dypiu.ac.in')) {\n    const localPart = email\n      .slice(0, -'dypiu.ac.in'.length)\n      .replace(/[^a-z0-9._+-]/g, '')\n      .replace(/[._-]+$/g, '');\n    if (localPart) {\n      email = `${localPart}@dypiu.ac.in`;\n    }\n  }\n\n  email = email\n    .replace(/[^a-z0-9@._+-]/g, '')\n    .replace(/\\.{2,}/g, '.')\n    .replace(/@{2,}/g, '@')\n    .replace(/^[._-]+/g, '')\n    .replace(/[._-]+$/g, '');\n\n  return email;\n}\n\nfunction isValidEmail(value) {\n  return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value);\n}\n\nfunction isPlaceholderEmail(value) {\n  const email = String(value ?? '').toLowerCase();\n  if (!email) return true;\n  if (/@example\\.(com|org|net)$/i.test(email)) return true;\n\n  const [localPart = '', domain = ''] = email.split('@');\n  if (['user', 'recipient', 'test', 'email', 'someone'].includes(localPart)) return true;\n  if (['example.com', 'example.org', 'example.net'].includes(domain)) return true;\n\n  return false;\n}\n\nif (toolName === 'send_email' && parsed.confirmed === true) {\n  const to = normalizeSpokenEmail(toolInput.to);\n  const subject = cleanText(toolInput.subject || 'Voice assistant message');\n  const body = cleanText(toolInput.body || toolInput.message);\n\n  if (isValidEmail(to) && !isPlaceholderEmail(to) && body) {\n    return {\n      tool_name: 'send_email',\n      tool_input: {\n        ...toolInput,\n        to,\n        subject,\n        body,\n      },\n      transcript,\n      confirmed: true,\n      listen_again: false,\n    };\n  }\n}\n\nfunction isGenericReminderTitle(value) {\n  return /^reminder$/i.test(cleanText(value));\n}\n\nfunction extractReminderTitleFromTranscript(value) {\n  const rules = [\n    /\\bremind me to\\s+(.+?)(?:\\s+(?:at|on|today|tomorrow|next)\\b|$)/i,\n    /\\b(?:set|create)\\s+(?:a\\s+)?reminder\\s+to\\s+(.+?)(?:\\s+(?:at|on|today|tomorrow|next)\\b|$)/i,\n  ];\n\n  for (const rule of rules) {\n    const match = value.match(rule);\n    if (match?.[1]) {\n      return cleanText(match[1]).replace(/[.,!?]+$/g, '');\n    }\n  }\n\n  return '';\n}\n\nfunction parseSimpleReminderDate(value) {\n  const base = DateTime.now().setZone(REMINDER_ZONE);\n  let target = base;\n\n  if (/\\btomorrow\\b/i.test(value)) {\n    target = target.plus({ days: 1 });\n  }\n\n  const timeMatch = value.match(/\\b(\\d{1,2})(?::(\\d{2}))?\\s*(a\\.?m\\.?|p\\.?m\\.?)\\b/i);\n  if (!timeMatch) {\n    return null;\n  }\n\n  let hour = Number(timeMatch[1]);\n  const minute = Number(timeMatch[2] ?? 0);\n  const meridiem = timeMatch[3].toLowerCase();\n\n  if (meridiem.startsWith('p') && hour < 12) {\n    hour += 12;\n  }\n  if (meridiem.startsWith('a') && hour === 12) {\n    hour = 0;\n  }\n\n  target = target.set({ hour, minute, second: 0, millisecond: 0 });\n  if (!/\\b(today|tomorrow)\\b/i.test(value) && target <= base) {\n    target = target.plus({ days: 1 });\n  }\n\n  return target;\n}\n\nfunction normalizeReminderDate(dateTime, transcriptValue) {\n  const cleanedDate = cleanText(dateTime);\n  const transcriptDate = parseSimpleReminderDate(transcriptValue);\n  const mentionsExplicitZone = /\\b(?:utc|gmt|ist|pst|est|cst)\\b/i.test(transcriptValue);\n\n  if (cleanedDate) {\n    const parsedDate = DateTime.fromISO(cleanedDate, { setZone: true });\n    if (parsedDate.isValid) {\n      if (transcriptDate && !mentionsExplicitZone && (parsedDate.offset === 0 || parsedDate.zoneName === 'UTC')) {\n        return transcriptDate;\n      }\n      return parsedDate.setZone(REMINDER_ZONE);\n    }\n  }\n\n  return transcriptDate;\n}\n\nconst transcriptRequestsEmail = transcriptLooksLikeEmailRequest(transcript);\nconst transcriptRequestsReminder = !transcriptRequestsEmail && transcriptLooksLikeReminderRequest(transcript);\n\nif (transcriptRequestsEmail) {\n  toolName = 'send_email';\n} else if (transcriptRequestsReminder) {\n  toolName = 'set_reminder';\n}\n\nif (toolName === 'send_email') {\n  const transcriptRecipient = extractEmailCandidateFromTranscript(transcript);\n  const candidateRecipients = [\n    transcriptRecipient,\n    toolInput.to,\n    toolInput.email,\n    toolInput.recipient,\n    toolInput.sendTo,\n  ].map(normalizeSpokenEmail).filter(Boolean);\n  const to =\n    candidateRecipients.find((value) => isValidEmail(value) && !isPlaceholderEmail(value)) ||\n    candidateRecipients[0] ||\n    '';\n  const fallbackBody = extractEmailBodyFromTranscript(transcript, transcriptRecipient);\n  let subject = cleanText(toolInput.subject);\n  let body = cleanText(\n    transcriptRequestsEmail\n      ? (fallbackBody || toolInput.body || toolInput.message)\n      : (toolInput.body ?? toolInput.message ?? fallbackBody)\n  );\n\n  if (!body && subject) {\n    body = subject;\n    subject = 'Voice assistant message';\n  } else if (!subject && body) {\n    subject = 'Voice assistant message';\n  } else if (transcriptRequestsEmail && fallbackBody && cleanText(subject) === cleanText(body)) {\n    subject = 'Voice assistant message';\n  }\n\n  if (!to || !isValidEmail(to) || isPlaceholderEmail(to) || !body) {\n    toolName = 'respond';\n    toolInput = {\n      message: 'Please repeat the email address and message clearly.',\n      original_tool_input: toolInput,\n    };\n  } else {\n    toolInput = {\n      ...toolInput,\n      to,\n      subject,\n      body,\n    };\n  }\n}\n\nif (toolName === 'set_reminder') {\n  const title = cleanText(toolInput.title ?? toolInput.summary ?? toolInput.message);\n  const normalizedTitle = isGenericReminderTitle(title)\n    ? extractReminderTitleFromTranscript(transcript) || 'Reminder'\n    : title;\n  const parsedDate = normalizeReminderDate(\n    toolInput.date_time ?? toolInput.datetime ?? toolInput.start,\n    transcript\n  );\n\n  if (!parsedDate?.isValid) {\n    toolName = 'respond';\n    toolInput = {\n      message: 'I heard a reminder request, but I need a clear date or time before I can create it.',\n      original_tool_input: toolInput,\n    };\n  } else {\n    const reminderDate = parsedDate.setZone(REMINDER_ZONE);\n    toolInput = {\n      ...toolInput,\n      title: normalizedTitle || 'Reminder',\n      date_time: reminderDate.toISO(),\n      response_time: reminderDate.toFormat('h:mm a'),\n      response_date: reminderDate.toFormat('d LLL'),\n      response_datetime: reminderDate.toFormat(\"h:mm a 'on' d LLL\"),\n    };\n  }\n}\n\nif (toolName === 'respond' && !toolInput.message) {\n  toolInput.message = parsed.message || rawContent || 'I could not understand the command.';\n}\n\nreturn {\n  tool_name: toolName,\n  tool_input: toolInput,\n  transcript,\n  confirmed: parsed.confirmed === true,\n  listen_again: Boolean(parsed.listen_again ?? toolInput.listen_again),\n};\n"
+      },
+      "id": "958eaf4a-1f5b-4f26-bfc5-a6bd77d82743",
+      "name": "Parse Tool Choice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tool_name }}",
+                    "rightValue": "send_email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "send_email"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tool_name }}",
+                    "rightValue": "set_reminder",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "set_reminder"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tool_name }}",
+                    "rightValue": "respond",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "respond"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "17583e68-5343-417c-8710-07a29ffdf182",
+      "name": "Route by Tool Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        32,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.tool_input.to }}",
+        "subject": "={{ $json.tool_input.subject }}",
+        "message": "={{ $json.tool_input.body }}",
+        "options": {}
+      },
+      "id": "90219391-a1bd-43ea-b405-5ebd0896b3cb",
+      "name": "Gmail - Send Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        288,
+        -368
+      ],
+      "notes": "Reconnect your Gmail OAuth2 credential after importing this workflow."
+    },
+    {
+      "parameters": {
+        "jsCode": "const parsed = $('Parse Tool Choice').item.json;\nconst toolName = $json.tool_name ?? parsed.tool_name;\nconst toolInput = $json.tool_input ?? parsed.tool_input ?? {};\nconst REMINDER_ZONE = 'Asia/Kolkata';\n\nfunction cleanText(value) {\n  return String(value ?? '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction isGenericReminderTitle(value) {\n  return /^reminder$/i.test(cleanText(value));\n}\n\nfunction formatReminderDateTime(value) {\n  const parsedDate = value ? DateTime.fromISO(String(value), { setZone: true }) : null;\n  if (!parsedDate?.isValid) {\n    return '';\n  }\n\n  return parsedDate.setZone(REMINDER_ZONE).toFormat(\"h:mm a 'on' d LLL\");\n}\n\nlet message = '';\n\nif (toolName === 'send_email') {\n  message = 'Email sent.';\n} else if (toolName === 'set_reminder') {\n  const title = cleanText(toolInput.title);\n  const reminderTime = cleanText(toolInput.response_datetime) || formatReminderDateTime(toolInput.date_time);\n\n  if (reminderTime && isGenericReminderTitle(title)) {\n    message = `Reminder set for ${reminderTime}`;\n  } else if (reminderTime && title) {\n    message = `Reminder for ${title} set for ${reminderTime}`;\n  } else if (title) {\n    message = `Reminder created: ${title}`;\n  } else {\n    message = 'Reminder created';\n  }\n} else {\n  message = toolInput.message || 'Task completed';\n}\n\nconst listenAgain = Boolean($json.listen_again ?? parsed.listen_again ?? toolInput.listen_again);\n\nreturn {\n  response: message,\n  tool_name: toolName,\n  tool_input: toolInput,\n  transcript: parsed.transcript,\n  listen_again: listenAgain,\n};"
+      },
+      "id": "8344e80a-7a79-43fb-bffc-06498a4c0c4e",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ \"http://127.0.0.1:5001/tts/\" + encodeURIComponent($json.response) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "85e1e527-ef49-4d5a-adc3-0b0b9a218569",
+      "name": "gTTS - Text to Speech",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        704,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "responseDataSource": "set",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "audio/wav"
+              },
+              {
+                "name": "Content-Disposition",
+                "value": "inline; filename=\"response.wav\""
+              },
+              {
+                "name": "X-Assistant-Listen-Again",
+                "value": "={{ $json.listen_again ? 'true' : 'false' }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "bc273841-f940-4d1e-a5e9-06cc2e982b1b",
+      "name": "Return Audio",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        880,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_CALENDAR_ID"
+        },
+        "start": "={{ $json.tool_input.date_time }}",
+        "end": "={{ DateTime.fromISO($json.tool_input.date_time).plus({ minutes: 30 }).toISO() }}",
+        "additionalFields": {
+          "summary": "={{ $json.tool_input.title }}"
+        }
+      },
+      "id": "d448e773-d885-4eeb-951d-3f24b799ddb8",
+      "name": "Create an event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        288,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Webhook - Receive Audio').item.json.body?.mode ?? '' }}",
+              "rightValue": "wake_check",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "2fb69853-1908-40a6-8e7c-fdb8873a7b80"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f8cb61a7-88ad-452f-9bfd-8082417c826b",
+      "name": "Check Wake Mode",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -400,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const transcript = String($json.text ?? '');\nconst body = $('Webhook - Receive Audio').item.json.body ?? {};\nconst wakeWord = String(body.wake_word ?? 'assistant');\n\nfunction normalize(value) {\n  return String(value)\n    .toLowerCase()\n    .replace(/[^a-z0-9\\s]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst normalizedTranscript = normalize(transcript);\nconst normalizedWakeWord = normalize(wakeWord);\nconst transcriptTokens = normalizedTranscript ? normalizedTranscript.split(' ') : [];\nconst wakeTokens = normalizedWakeWord ? normalizedWakeWord.split(' ') : [];\n\nlet responseTranscript = transcript;\nif (wakeTokens.length === 1 && transcriptTokens.length > 0 && transcriptTokens.every(token => token === wakeTokens[0])) {\n  responseTranscript = wakeWord;\n}\n\nconst detected = normalizedWakeWord.length > 0 && normalize(responseTranscript).includes(normalizedWakeWord);\n\nreturn {\n  detected,\n  wake_word: wakeWord,\n  transcript: responseTranscript,\n  mode: 'wake_check'\n};"
+      },
+      "id": "ac75bf45-3c18-430e-b89a-624fb12a0a58",
+      "name": "Detect Wake Word",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "f47e3f2a-9462-473e-90c4-111f1f60c207",
+      "name": "Return Wake Check JSON",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        16,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const REMINDER_ZONE = 'Asia/Kolkata';\n\nfunction cleanText(value) {\n  return String(value ?? '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction collapseRepeatedTokens(value, maxRun = 4) {\n  const tokens = cleanText(value).split(' ').filter(Boolean);\n  const kept = [];\n\n  let previous = '';\n  let runLength = 0;\n  for (const token of tokens) {\n    const normalized = token.toLowerCase();\n    if (normalized === previous) {\n      runLength += 1;\n    } else {\n      previous = normalized;\n      runLength = 1;\n    }\n\n    if (runLength <= maxRun) {\n      kept.push(token);\n    }\n  }\n\n  return kept.join(' ');\n}\n\nfunction normalizeTranscript(value) {\n  return collapseRepeatedTokens(String(value ?? ''))\n    .trim()\n    .replace(/\\bset remainder\\b/gi, 'set reminder')\n    .replace(/\\bcreate (?:a )?remainder\\b/gi, 'create a reminder')\n    .replace(/\\bremainder\\b(?=\\s+(for|at|on|today|tomorrow|next|\\d))/gi, 'reminder');\n}\n\nlet transcript = normalizeTranscript($json.text);\nif (transcript.length > 240) {\n  transcript = transcript.slice(0, 240).trim();\n}\n\nconst systemPrompt = [\n  'You are an intent router for a local voice assistant.',\n  'Current local date/time in Asia/Kolkata is ' + DateTime.now().setZone(REMINDER_ZONE).toISO() + '.',\n  'Return only a compact JSON object on one line.',\n  'Allowed tool_name values are exactly send_email, set_reminder, respond.',\n  'Use send_email when the user asks to send an email.',\n  'Use set_reminder only when the user asks for a reminder or calendar event.',\n  'For set_reminder, return tool_input.date_time as ISO 8601 with +05:30 when no timezone is specified.',\n  'For weather, search, current news, latest facts, or anything requiring live internet, use respond.',\n  'Never invent tools.',\n  'Schema: {\"tool_name\":\"respond\",\"tool_input\":{\"message\":\"...\"}}'\n].join(' ');\n\nreturn {\n  ...$json,\n  text: transcript,\n  groqBody: JSON.stringify({\n    model: 'llama-3.1-8b-instant',\n    messages: [\n      { role: 'system', content: systemPrompt },\n      { role: 'user', content: transcript || 'No speech was detected.' },\n    ],\n    temperature: 0,\n    max_tokens: 120,\n  }),\n};"
+      },
+      "id": "74b27173-8fcb-4a10-8d5f-d21d39b19144",
+      "name": "Build Pollinations GPT-5 Mini Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        -160
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook - Receive Audio": {
+      "main": [
+        [
+          {
+            "node": "Whisper - Speech to Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Whisper - Speech to Text": {
+      "main": [
+        [
+          {
+            "node": "Check Wake Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pollinations GPT-5 Mini - General LLM": {
+      "main": [
+        [
+          {
+            "node": "Parse Tool Choice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Tool Choice": {
+      "main": [
+        [
+          {
+            "node": "Route by Tool Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Tool Type": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create an event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Send Email": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "gTTS - Text to Speech",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "gTTS - Text to Speech": {
+      "main": [
+        [
+          {
+            "node": "Return Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Wake Mode": {
+      "main": [
+        [
+          {
+            "node": "Detect Wake Word",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Pollinations GPT-5 Mini Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Wake Word": {
+      "main": [
+        [
+          {
+            "node": "Return Wake Check JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Pollinations GPT-5 Mini Request": {
+      "main": [
+        [
+          {
+            "node": "Pollinations GPT-5 Mini - General LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": null,
+  "tags": []
+}

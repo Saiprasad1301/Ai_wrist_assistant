@@ -65,6 +65,10 @@ ai-wrist-assistant/
     start-gtts.ps1
     requirements.txt
 
+  n8n-workflows/
+    production-ready-workflow.json
+                              Sanitized n8n workflow export
+
 ```
 
 ## Hardware Used
@@ -287,7 +291,13 @@ ws://127.0.0.1:8787/ws
 
 ## n8n Workflow Notes
 
-The live n8n workflow export is not included in this repository because n8n exports can contain credentials or API keys.
+This repository includes a sanitized workflow export:
+
+```text
+n8n-workflows/production-ready-workflow.json
+```
+
+Before committing, the export was cleaned so it does not include API keys, live n8n credential bindings, webhook instance IDs, or local runtime state. After importing it into n8n, reconnect Gmail and Google Calendar credentials, then replace `YOUR_GOOGLE_CALENDAR_ID` with your real calendar ID.
 
 Expected local webhook:
 
